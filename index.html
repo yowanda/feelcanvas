@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FeelCanvas — Type how you feel. Watch it become art.</title>
+<style>
+  :root { --ink:#1f1f1f; --muted:#6b6b6b; --line:#e8e4dd; --bg:#fdfcf9; --accent:#2b6cb0; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Georgia, "Times New Roman", serif; color:var(--ink); background:var(--bg); line-height:1.6; }
+  header { text-align:center; padding:2.2rem 1rem 0.5rem; }
+  h1 { font-size:2.6rem; margin:0 0 0.2rem; letter-spacing:-0.5px; }
+  .tagline { font-size:1.15rem; color:var(--muted); margin:0 0 1.2rem; }
+  main { max-width:920px; margin:0 auto; padding:0 1rem 3rem; }
+  .emotions { display:flex; flex-wrap:wrap; gap:0.5rem; justify-content:center; margin:0.5rem 0 1rem; }
+  .emotions button { font-family:inherit; font-size:1rem; padding:0.55rem 1rem; border:2px solid var(--line); border-radius:999px; background:#fff; cursor:pointer; transition:transform .1s, border-color .15s; }
+  .emotions button:hover { transform:translateY(-1px); border-color:var(--accent); }
+  .emotions button[aria-pressed="true"] { border-color:var(--ink); background:var(--ink); color:#fff; }
+  .emotions button:focus-visible, .actions button:focus-visible, input:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+  .custom { display:flex; gap:0.5rem; justify-content:center; flex-wrap:wrap; margin:0 0 1.2rem; }
+  .custom label { position:absolute; left:-9999px; }
+  .custom input { font-family:inherit; font-size:1rem; padding:0.6rem 0.9rem; border:2px solid var(--line); border-radius:10px; width:min(320px, 80vw); background:#fff; }
+  .custom button { font-family:inherit; font-size:1rem; padding:0.6rem 1.1rem; border:2px solid var(--ink); border-radius:10px; background:var(--ink); color:#fff; cursor:pointer; }
+  #mapNote { text-align:center; color:var(--muted); min-height:1.4em; margin:-0.6rem 0 0.8rem; font-style:italic; }
+  .stage { background:#fff; border:1px solid var(--line); border-radius:14px; padding:12px; box-shadow:0 6px 24px rgba(0,0,0,.06); }
+  canvas#art { display:block; width:100%; height:auto; border-radius:8px; background:#fff; }
+  .actions { display:flex; gap:0.5rem; justify-content:center; margin:1rem 0 0.4rem; flex-wrap:wrap; }
+  .actions button { font-family:inherit; font-size:1rem; padding:0.6rem 1.2rem; border-radius:10px; cursor:pointer; }
+  #regenBtn { border:2px solid var(--ink); background:#fff; }
+  #dlBtn { border:2px solid var(--ink); background:var(--ink); color:#fff; }
+  .explain { margin:1.2rem 0; padding:1.1rem 1.3rem; background:#fff; border:1px solid var(--line); border-left:6px solid var(--swatch, #2b6cb0); border-radius:10px; }
+  .explain h2 { margin:0 0 0.3rem; font-size:1.3rem; }
+  .explain p { margin:0; }
+  .swatches { display:flex; gap:0.4rem; margin-top:0.7rem; }
+  .swatches span { width:28px; height:28px; border-radius:50%; border:1px solid rgba(0,0,0,.15); display:inline-block; }
+  h2.section { text-align:center; font-size:1.4rem; margin:2.2rem 0 0.8rem; }
+  .gallery { display:grid; grid-template-columns:repeat(4, 1fr); gap:0.8rem; }
+  .g-item { text-align:center; cursor:pointer; background:#fff; border:1px solid var(--line); border-radius:10px; padding:8px; }
+  .g-item:hover { border-color:var(--accent); }
+  .g-item canvas { width:100%; height:auto; display:block; border-radius:6px; }
+  .g-item span { font-size:0.9rem; color:var(--muted); }
+  footer { text-align:center; color:var(--muted); font-size:0.9rem; padding:1rem; }
+  @media (max-width:600px) {
+    h1 { font-size:2rem; }
+    .gallery { grid-template-columns:repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>FeelCanvas 🎨</h1>
+  <p class="tagline">Type how you feel. Watch it become art.</p>
+</header>
+<main>
+  <div class="emotions" role="group" aria-label="Choose a feeling"></div>
+
+  <form class="custom" id="customForm">
+    <label for="feelingInput">Or type a feeling</label>
+    <input id="feelingInput" type="text" placeholder="or type a feeling…" autocomplete="off">
+    <button type="submit">Make art</button>
+  </form>
+  <p id="mapNote" aria-live="polite"></p>
+
+  <div class="stage">
+    <canvas id="art" width="1080" height="720" role="img" aria-label="Generative artwork for the selected feeling"></canvas>
+  </div>
+  <div class="actions">
+    <button id="regenBtn" type="button">Regenerate</button>
+    <button id="dlBtn" type="button">Download PNG</button>
+  </div>
+
+  <div class="explain" id="explain" aria-live="polite">
+    <h2 id="explainTitle"></h2>
+    <p id="explainText"></p>
+    <div class="swatches" id="swatches"></div>
+  </div>
+
+  <h2 class="section">Gallery of all 8 feelings</h2>
+  <div class="gallery" id="gallery"></div>
+</main>
+<footer>FeelCanvas — generative art from emotion. Nothing leaves your browser.</footer>
+
+<script>
+"use strict";
+/* Seeded PRNG (mulberry32) — same seed = same artwork, every time. */
+function mulberry32(a) {
+  return function() {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    var t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function pick(rng, arr) { return arr[Math.floor(rng() * arr.length)]; }
+
+/* ---- Motif painters: each takes (ctx, w, h, rng, palette) ---- */
+function drawJoy(ctx, w, h, rng, P) {
+  ctx.fillStyle = P[3]; ctx.fillRect(0, 0, w, h);
+  var cx = w * 0.5, cy = h * 0.5;
+  for (var i = 0; i < 90; i++) {
+    var a = (i / 90) * Math.PI * 2 + rng() * 0.05;
+    var len = Math.min(w, h) * (0.55 + rng() * 0.35);
+    ctx.strokeStyle = pick(rng, [P[0], P[1], P[2]]); ctx.lineWidth = 3 + rng() * 9;
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(a) * len, cy + Math.sin(a) * len); ctx.stroke();
+  }
+  ctx.fillStyle = P[0];
+  ctx.beginPath(); ctx.arc(cx, cy, Math.min(w, h) * 0.16, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = P[4];
+  ctx.beginPath(); ctx.arc(cx, cy, Math.min(w, h) * 0.09, 0, Math.PI * 2); ctx.fill();
+  for (var j = 0; j < 40; j++) {
+    ctx.fillStyle = pick(rng, P);
+    ctx.beginPath(); ctx.arc(rng() * w, rng() * h, 2 + rng() * 7, 0, Math.PI * 2); ctx.fill();
+  }
+}
+function drawCalm(ctx, w, h, rng, P) {
+  ctx.fillStyle = P[3]; ctx.fillRect(0, 0, w, h);
+  for (var layer = 0; layer < 6; layer++) {
+    ctx.fillStyle = P[layer % P.length];
+    ctx.globalAlpha = 0.55; ctx.beginPath();
+    var base = h * (0.25 + layer * 0.13);
+    ctx.moveTo(0, h); ctx.lineTo(0, base);
+    for (var x = 0; x <= w; x += 12) {
+      ctx.lineTo(x, base + Math.sin(x * 0.008 + layer * 1.7 + rng() * 0.4) * (18 + layer * 8));
+    }
+    ctx.lineTo(w, h); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+  }
+  ctx.fillStyle = P[4];
+  ctx.beginPath(); ctx.arc(w * 0.78, h * 0.22, Math.min(w, h) * 0.07, 0, Math.PI * 2); ctx.fill();
+}
+function drawSadness(ctx, w, h, rng, P) {
+  ctx.fillStyle = P[3]; ctx.fillRect(0, 0, w, h);
+  for (var i = 0; i < 260; i++) {
+    var x = rng() * w, y = rng() * h, len = 12 + rng() * 34;
+    ctx.strokeStyle = pick(rng, [P[0], P[1], P[4]]); ctx.lineWidth = 1 + rng() * 1.6;
+    ctx.globalAlpha = 0.35 + rng() * 0.5;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - len * 0.18, y + len); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  for (var j = 0; j < 60; j++) {
+    ctx.fillStyle = pick(rng, [P[1], P[4]]);
+    ctx.beginPath(); ctx.ellipse(rng() * w, h * 0.88 + rng() * h * 0.12, 4 + rng() * 10, 2 + rng() * 4, 0, 0, Math.PI * 2); ctx.fill();
+  }
+}
+function drawAnger(ctx, w, h, rng, P) {
+  ctx.fillStyle = P[3]; ctx.fillRect(0, 0, w, h);
+  for (var i = 0; i < 46; i++) {
+    var x = rng() * w, y = rng() * h, s = 30 + rng() * 130;
+    ctx.fillStyle = pick(rng, [P[0], P[1], P[2], P[4]]); ctx.globalAlpha = 0.75 + rng() * 0.25;
+    ctx.beginPath(); ctx.moveTo(x, y);
+    ctx.lineTo(x + s * (rng() - 0.5), y + s * (rng() - 0.5));
+    ctx.lineTo(x + s * (rng() - 0.5), y + s * (rng() - 0.5));
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  for (var j = 0; j < 14; j++) {
+    ctx.strokeStyle = P[0]; ctx.lineWidth = 2 + rng() * 3;
+    ctx.beginPath(); var sx = rng() * w, sy = rng() * h;
+    ctx.moveTo(sx, sy); ctx.lineTo(sx + (rng() - 0.5) * 220, sy + (rng() - 0.5) * 220); ctx.stroke();
+  }
+}
+function drawHeart(ctx, x, y, s, color) {
+  ctx.fillStyle = color; ctx.beginPath();
+  ctx.moveTo(x, y + s * 0.35);
+  ctx.bezierCurveTo(x - s, y - s * 0.55, x - s * 0.45, y - s * 1.15, x, y - s * 0.4);
+  ctx.bezierCurveTo(x + s * 0.45, y - s * 1.15, x + s, y - s * 0.55, x, y + s * 0.35);
+  ctx.closePath(); ctx.fill();
+}
+function drawLove(ctx, w, h, rng, P) {
+  ctx.fillStyle = P[3]; ctx.fillRect(0, 0, w, h);
+  for (var i = 0; i < 55; i++) {
+    var x = rng() * w, y = rng() * h;
+    var petals = 5 + Math.floor(rng() * 4);
+    for (var p = 0; p < petals; p++) {
+      var a = (p / petals) * Math.PI * 2;
+      ctx.fillStyle = pick(rng, [P[0], P[1], P[4]]);
+      ctx.globalAlpha = 0.6;
+      ctx.beginPath();
+      ctx.ellipse(x + Math.cos(a) * 14, y + Math.sin(a) * 14, 13 + rng() * 8, 7 + rng() * 5, a, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1; ctx.fillStyle = P[2];
+    ctx.beginPath(); ctx.arc(x, y, 6 + rng() * 4, 0, Math.PI * 2); ctx.fill();
+  }
+  for (var j = 0; j < 16; j++) drawHeart(ctx, rng() * w, rng() * h, 14 + rng() * 30, pick(rng, [P[0], P[1]]));
+}
+function drawAnxiety(ctx, w, h, rng, P) {
+  ctx.fillStyle = P[3]; ctx.fillRect(0, 0, w, h);
+  for (var i = 0; i < 42; i++) {
+    ctx.strokeStyle = pick(rng, [P[0], P[1], P[2], P[4]]); ctx.lineWidth = 0.8 + rng() * 1.8;
+    ctx.globalAlpha = 0.5 + rng() * 0.4;
+    ctx.beginPath();
+    var x = rng() * w, y = rng() * h;
+    ctx.moveTo(x, y);
+    for (var s = 0; s < 26; s++) {
+      x += (rng() - 0.5) * 90; y += (rng() - 0.5) * 90;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  for (var j = 0; j < 50; j++) {
+    ctx.fillStyle = P[4];
+    ctx.beginPath(); ctx.arc(rng() * w, rng() * h, 1.5 + rng() * 3, 0, Math.PI * 2); ctx.fill();
+  }
+}
+function drawHope(ctx, w, h, rng, P) {
+  var g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, P[3]); g.addColorStop(0.62, P[2]); g.addColorStop(1, P[0]);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+  var cx = w * 0.5, cy = h * 0.62, r = Math.min(w, h) * 0.16;
+  var rg = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r * 2.6);
+  rg.addColorStop(0, P[4]); rg.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = rg; ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = P[4];
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  for (var i = 0; i < 26; i++) {
+    var a = -Math.PI * (0.08 + (i / 26) * 0.84);
+    ctx.strokeStyle = P[4]; ctx.globalAlpha = 0.55; ctx.lineWidth = 2 + rng() * 3;
+    ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * r * 1.3, cy + Math.sin(a) * r * 1.3);
+    ctx.lineTo(cx + Math.cos(a) * r * (2.1 + rng() * 1.2), cy + Math.sin(a) * r * (2.1 + rng() * 1.2));
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1; ctx.fillStyle = P[1];
+  ctx.beginPath(); ctx.ellipse(cx, h * 0.94, w * 0.55, h * 0.10, 0, 0, Math.PI * 2); ctx.fill();
+}
+function drawNostalgia(ctx, w, h, rng, P) {
+  ctx.fillStyle = P[3]; ctx.fillRect(0, 0, w, h);
+  for (var i = 0; i < 26; i++) {
+    ctx.fillStyle = pick(rng, [P[0], P[1], P[2], P[4]]); ctx.globalAlpha = 0.35 + rng() * 0.3;
+    var bw = 60 + rng() * 220, bh = 40 + rng() * 150;
+    ctx.fillRect(rng() * (w - bw), rng() * (h - bh), bw, bh);
+  }
+  ctx.globalAlpha = 1;
+  for (var j = 0; j < 9000; j++) {
+    var v = Math.floor(rng() * 255);
+    ctx.fillStyle = "rgba(" + v + "," + v + "," + v + ",0.05)";
+    ctx.fillRect(rng() * w, rng() * h, 1.5, 1.5);
+  }
+  var vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.25, w / 2, h / 2, Math.max(w, h) * 0.72);
+  vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(30,18,6,0.55)");
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = P[4]; ctx.lineWidth = 6; ctx.strokeRect(10, 10, w - 20, h - 20);
+}
+
+var EMOTIONS = {
+  joy:      { label: "Joy",      palette: ["#F6C90E", "#F98404", "#F43F5E", "#FFF3C4", "#FF8A00"], draw: drawJoy,
+              explain: "Warm golds feel like sunlight on skin — bright, generous, impossible to ignore. The rays burst outward because joy rarely sits still; it radiates. High-saturation yellows and oranges raise energy and signal warmth, which is why celebrations everywhere reach for them." },
+  calm:     { label: "Calm",     palette: ["#2A9D8F", "#48CAE4", "#90E0EF", "#EAF6F3", "#1D6A6A"], draw: drawCalm,
+              explain: "Cool teals and soft blues slow the eye the way slow breathing slows the body. The waves never break — they roll, layer over layer, like water settling after a ripple. In color psychology, blue-greens are linked to rest, clarity, and open space." },
+  sadness:  { label: "Sadness",  palette: ["#1D3557", "#457B9D", "#A8DADC", "#E8F1F5", "#6D8EA8"], draw: drawSadness,
+              explain: "Deep blues pull inward and downward, like rain and like heavy thoughts. The vertical streaks fall steadily, never chaotically — sadness is often quiet, not loud. Muted, desaturated tones give the feeling room to be felt instead of forcing it away." },
+  anger:    { label: "Anger",    palette: ["#D90429", "#EF233C", "#FF6B35", "#2B0A0A", "#8C1D18"], draw: drawAnger,
+              explain: "Red is the color of heat, blood, and alarm — the body literally flushes when angry. Sharp triangles and jagged edges mirror that tension: nothing here is soft or rounded. The dark background makes the reds feel louder, the way anger makes everything else disappear." },
+  love:     { label: "Love",     palette: ["#FF5D8F", "#FF8FA3", "#FFC2D4", "#FFF0F3", "#E63946"], draw: drawLove,
+              explain: "Pinks are red made gentle — passion softened into care. Blooms and hearts grow in every direction because love, at its best, is generous and a little unruly. Warm rose tones are linked to tenderness, affection, and the feeling of being held close." },
+  anxiety:  { label: "Anxiety",  palette: ["#6D4C9A", "#9B7ED9", "#B8A9D9", "#F1EDF7", "#3E2A56"], draw: drawAnxiety,
+              explain: "Anxiety is a knot: thoughts that loop, snag, and double back. The tangled lines never settle into a pattern, and the muted purples feel heavy without being loud. Purple sits between blue and red — calm and alarm at once — which is exactly what worry feels like." },
+  hope:     { label: "Hope",     palette: ["#FFB703", "#FB8500", "#FFD166", "#FFF8E7", "#FFE066"], draw: drawHope,
+              explain: "Every sunrise is the same promise: the dark part is over. Warm golds rise from below the horizon, and the light spreads upward instead of falling down. Hope is the only feeling that points up — so this artwork does too." },
+  nostalgia:{ label: "Nostalgia", palette: ["#B08968", "#DDB892", "#E6CCB2", "#EDE0D4", "#7F5539"], draw: drawNostalgia,
+              explain: "Sepia is the color of old photographs — memory with the edges worn soft. The film grain and vignette copy how we actually remember: the center bright, the details fuzzy, the corners dark. Warm browns feel like home, even when home is far away." }
+};
+
+var KEYWORDS = [
+  [/happy|excited|great|awesome|wonderful|amazing|delighted|cheerful|joyful|fun|laugh|celebrat|proud|grateful.*day/i, "joy"],
+  [/calm|peace|relax|chill|serene|tranquil|quiet|still|breathe|meditat|sleepy|content/i, "calm"],
+  [/sad|lonely|blue|down|depress|grief|heartbroken|miss|hurt|empty|cry|tear|alone/i, "sadness"],
+  [/angry|mad|furious|frustrat|annoy|irritat|rage|hate|upset|livid|fume/i, "anger"],
+  [/love|adore|crush|romantic|affection|fond|sweetheart|darling|beloved|passion/i, "love"],
+  [/anxious|anxiety|stress|worried|nervous|panic|overwhelm|scared|afraid|fear|tense|restless|uneasy/i, "anxiety"],
+  [/hope|optimist|faith|believe|better|future|dream|wish|grateful|thankful|blessed|inspire/i, "hope"],
+  [/nostalg|memory|childhood|remember|old days|miss.*time|throwback|vintage|longing|homesick/i, "nostalgia"]
+];
+function mapKeyword(text) {
+  var t = (text || "").trim();
+  if (!t) return null;
+  for (var i = 0; i < KEYWORDS.length; i++) {
+    if (KEYWORDS[i][0].test(t)) return KEYWORDS[i][1];
+  }
+  return "calm";
+}
+
+var state = { emotion: "joy", seed: 20261015 };
+var artCanvas = document.getElementById("art");
+var artCtx = artCanvas.getContext("2d");
+
+function render(canvas, emotionKey, seed) {
+  var e = EMOTIONS[emotionKey];
+  var ctx = canvas.getContext("2d");
+  var rng = mulberry32(seed);
+  ctx.save();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  e.draw(ctx, canvas.width, canvas.height, rng, e.palette);
+  ctx.restore();
+}
+function updateUI(note) {
+  var e = EMOTIONS[state.emotion];
+  document.getElementById("explainTitle").textContent = e.label;
+  document.getElementById("explainText").textContent = e.explain;
+  document.querySelector(".explain").style.setProperty("--swatch", e.palette[0]);
+  var sw = document.getElementById("swatches");
+  sw.innerHTML = "";
+  e.palette.forEach(function(c) {
+    var s = document.createElement("span");
+    s.style.background = c; s.title = c;
+    sw.appendChild(s);
+  });
+  document.querySelectorAll(".emotions button").forEach(function(b) {
+    b.setAttribute("aria-pressed", b.dataset.emotion === state.emotion ? "true" : "false");
+  });
+  document.querySelectorAll(".g-item").forEach(function(g) {
+    g.style.borderColor = g.dataset.emotion === state.emotion ? "var(--ink)" : "";
+  });
+  document.getElementById("mapNote").textContent = note || "";
+  artCanvas.setAttribute("aria-label", "Generative artwork for " + e.label);
+}
+function selectEmotion(key, note) {
+  state.emotion = key;
+  state.seed = (Math.random() * 1000000) | 0;
+  render(artCanvas, key, state.seed);
+  updateUI(note);
+}
+
+/* Emotion buttons */
+var emoWrap = document.querySelector(".emotions");
+Object.keys(EMOTIONS).forEach(function(key) {
+  var b = document.createElement("button");
+  b.type = "button"; b.dataset.emotion = key;
+  b.textContent = EMOTIONS[key].label;
+  b.setAttribute("aria-pressed", "false");
+  b.addEventListener("click", function() { selectEmotion(key); });
+  emoWrap.appendChild(b);
+});
+
+/* Gallery of all 8 */
+var gallery = document.getElementById("gallery");
+Object.keys(EMOTIONS).forEach(function(key, idx) {
+  var item = document.createElement("div");
+  item.className = "g-item"; item.dataset.emotion = key;
+  item.setAttribute("role", "button"); item.tabIndex = 0;
+  item.setAttribute("aria-label", "Show " + EMOTIONS[key].label + " artwork");
+  var c = document.createElement("canvas");
+  c.width = 270; c.height = 180;
+  render(c, key, 1000 + idx * 777);
+  var lbl = document.createElement("span");
+  lbl.textContent = EMOTIONS[key].label;
+  item.appendChild(c); item.appendChild(lbl);
+  function pickIt() { selectEmotion(key); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  item.addEventListener("click", pickIt);
+  item.addEventListener("keydown", function(ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); pickIt(); } });
+  gallery.appendChild(item);
+});
+
+/* Custom feeling input */
+document.getElementById("customForm").addEventListener("submit", function(ev) {
+  ev.preventDefault();
+  var val = document.getElementById("feelingInput").value;
+  if (!val.trim()) return;
+  var mapped = mapKeyword(val);
+  var matched = KEYWORDS.some(function(k) { return k[0].test(val); });
+  selectEmotion(mapped, matched
+    ? "“" + val.trim() + "” sounds like " + EMOTIONS[mapped].label + "."
+    : "“" + val.trim() + "” is a feeling we don't have yet — mapped to the closest feeling, Calm.");
+});
+
+/* Regenerate + Download */
+document.getElementById("regenBtn").addEventListener("click", function() {
+  state.seed = (Math.random() * 1000000) | 0;
+  render(artCanvas, state.emotion, state.seed);
+});
+document.getElementById("dlBtn").addEventListener("click", function() {
+  var a = document.createElement("a");
+  a.href = artCanvas.toDataURL("image/png");
+  a.download = "feelcanvas-" + state.emotion + "-" + state.seed + ".png";
+  document.body.appendChild(a); a.click(); a.remove();
+});
+
+/* Initial render */
+render(artCanvas, state.emotion, state.seed);
+updateUI("");
+</script>
+</body>
+</html>
