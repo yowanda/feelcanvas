@@ -356,7 +356,7 @@ Object.keys(EMOTIONS).forEach(function(key, idx) {
 document.getElementById("customForm").addEventListener("submit", function(ev) {
   ev.preventDefault();
   var val = document.getElementById("feelingInput").value;
-  if (!val.trim()) return;
+  if (!val.trim()) { document.getElementById("mapNote").textContent = "Type a feeling first — or pick one above."; return; }
   var mapped = mapKeyword(val);
   var matched = KEYWORDS.some(function(k) { return k[0].test(val); });
   selectEmotion(mapped, matched

@@ -1,0 +1,4 @@
+# FeelCanvas temp / local artifacts
+cover.png
+*.log
+.DS_Store
